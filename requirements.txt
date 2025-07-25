@@ -3,3 +3,4 @@ pandas
 numpy
 firebase-admin
 openpyxl
+python-dotenv
