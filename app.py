@@ -7,8 +7,11 @@ from firebase_admin import credentials, firestore
 import io
 import os
 import json
+from dotenv import load_dotenv
 
-# 🔐 Initialize Firebase
+# 🔐 Load Firebase Key from Environment
+load_dotenv()
+
 if not firebase_admin._apps:
     firebase_creds = json.loads(os.getenv("FIREBASE_KEY"))
     cred = credentials.Certificate(firebase_creds)
@@ -35,8 +38,22 @@ def fetch_firestore_records():
     data = {doc.id: doc.to_dict() for doc in docs}
     return data
 
+# Convert numpy values to native Python types before saving to Firestore
+def clean_numpy_types(data):
+    if isinstance(data, dict):
+        return {k: clean_numpy_types(v) for k, v in data.items()}
+    elif isinstance(data, list):
+        return [clean_numpy_types(item) for item in data]
+    elif isinstance(data, (np.int64, np.int32)):
+        return int(data)
+    elif isinstance(data, (np.float64, np.float32)):
+        return float(data)
+    else:
+        return data
+
 # Save a record
 def save_record(index, data):
+    data = clean_numpy_types(data)
     db.collection(COLLECTION).document(str(index)).set(data)
 
 # Upload
@@ -48,7 +65,8 @@ if st.button("🔄 Reset All Data"):
 stored_data = fetch_firestore_records()
 current_index = int(st.session_state.get("current_index", 0))
 
-if uploaded_file and not stored_data:
+# If file uploaded, set month/year selection (always)
+if uploaded_file:
     df = pd.read_excel(uploaded_file)
     df.columns = [col.strip() for col in df.columns]
     if 'Employee Code' not in df.columns or 'Employee Name' not in df.columns:
@@ -58,6 +76,8 @@ if uploaded_file and not stored_data:
     employee_list = df[['Employee Code', 'Employee Name']].drop_duplicates().reset_index(drop=True)
     st.session_state["employee_list"] = employee_list.to_dict("records")
     st.session_state["total_employees"] = len(employee_list)
+
+    # Always let user select month/year
     st.session_state["month"] = st.selectbox("🗓️ Month", list(range(1, 13)), index=datetime.now().month - 1)
     st.session_state["year"] = st.selectbox("📆 Year", list(range(2023, 2031)), index=1)
 else:
@@ -79,7 +99,7 @@ if not employee_list.empty and current_index < len(employee_list):
 
     for day in range(1, days_in_month + 1):
         date_str = f"{day:02d}-{st.session_state['month']:02d}"
-        st.markdown(f"#### 🗕️ {date_str}")
+        st.markdown(f"#### 🔕 {date_str}")
         status = st.selectbox(f"Status for {date_str}", ["P", "A", "L", "WO", "HL", "PH"],
                               key=f"status_{day}", index=["P", "A", "L", "WO", "HL", "PH"].index(row_data.get(f"{day:02d}_Status", "P")))
 
