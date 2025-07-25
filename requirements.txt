@@ -1,7 +1,6 @@
 streamlit
-pandas
-numpy
 firebase-admin
-openpyxl
+pandas
 python-dotenv
+openpyxl
 xlsxwriter
