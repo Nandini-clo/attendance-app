@@ -6,10 +6,12 @@ import firebase_admin
 from firebase_admin import credentials, firestore
 import io
 import os
+import json
 
 # 🔐 Initialize Firebase
 if not firebase_admin._apps:
-    cred = credentials.Certificate("attendanceapp-2614e-firebase-adminsdk-fbsvc-ab8c74b289.json")
+    firebase_creds = json.loads(os.getenv("FIREBASE_KEY"))
+    cred = credentials.Certificate(firebase_creds)
     firebase_admin.initialize_app(cred)
 db = firestore.client()
 
@@ -77,7 +79,7 @@ if not employee_list.empty and current_index < len(employee_list):
 
     for day in range(1, days_in_month + 1):
         date_str = f"{day:02d}-{st.session_state['month']:02d}"
-        st.markdown(f"#### 📅 {date_str}")
+        st.markdown(f"#### 🗕️ {date_str}")
         status = st.selectbox(f"Status for {date_str}", ["P", "A", "L", "WO", "HL", "PH"],
                               key=f"status_{day}", index=["P", "A", "L", "WO", "HL", "PH"].index(row_data.get(f"{day:02d}_Status", "P")))
 
@@ -139,7 +141,7 @@ if not employee_list.empty and current_index < len(employee_list):
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("⏮️ Previous"):
+        if st.button("⏹️ Previous"):
             if current_index > 0:
                 st.session_state["current_index"] = current_index - 1
                 st.rerun()
@@ -159,4 +161,4 @@ if len(stored_data) > 0 and current_index >= len(stored_data):
     with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
         final_df.to_excel(writer, index=False, sheet_name="Attendance")
 
-    st.download_button("📥 Download Excel", data=towrite.getvalue(), file_name="final_attendance.xlsx")
+    st.download_button("📅 Download Excel", data=towrite.getvalue(), file_name="final_attendance.xlsx")
