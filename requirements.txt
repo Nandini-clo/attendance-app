@@ -4,3 +4,4 @@ numpy
 firebase-admin
 openpyxl
 python-dotenv
+xlsxwriter
