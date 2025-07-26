@@ -30,11 +30,10 @@ except Exception as e:
 
 COLLECTION = "attendance_records"
 
-# 🖥️ Streamlit Setup
 st.set_page_config(page_title="Attendance App", layout="wide")
 st.title("📋 Employee Attendance Sheet Generator")
 
-# 🔁 Firestore Functions
+# 🔁 Firestore Helpers
 def reset_firestore():
     try:
         docs = db.collection(COLLECTION).stream()
@@ -43,7 +42,7 @@ def reset_firestore():
         st.session_state.clear()
         st.success("✅ Firestore data reset successfully.")
     except Exception as e:
-        st.error(f"Firestore reset error: {e}")
+        st.error(f"❌ Firestore reset error: {e}")
 
 def fetch_firestore_records():
     try:
@@ -53,7 +52,6 @@ def fetch_firestore_records():
         return {}
 
 def convert_to_python_types(data):
-    """Convert NumPy types to native Python types"""
     return {
         k: (int(v) if isinstance(v, (np.integer, np.int64)) else float(v) if isinstance(v, np.floating) else v)
         for k, v in data.items()
@@ -63,10 +61,16 @@ def save_record(index, data):
     clean_data = convert_to_python_types(data)
     db.collection(COLLECTION).document(str(index)).set(clean_data)
 
-# 📁 Upload Section
+# 📁 Upload
 uploaded_file = st.file_uploader("📄 Upload Excel with 'Employee Code' & 'Employee Name'", type=["xlsx"])
 if st.button("🔄 Reset All Data"):
     reset_firestore()
+
+# Auto-reset session on new file
+if uploaded_file and "uploaded_filename" not in st.session_state:
+    reset_firestore()
+    st.session_state["current_index"] = 0
+    st.session_state["uploaded_filename"] = uploaded_file.name
 
 stored_data = fetch_firestore_records()
 current_index = int(st.session_state.get("current_index", 0))
@@ -88,12 +92,12 @@ if uploaded_file:
         st.session_state["year"] = st.selectbox("📆 Year", list(range(2023, 2031)), index=1)
 
     except Exception as e:
-        st.error(f"❌ Failed to read Excel file: {e}")
+        st.error(f"❌ Failed to read Excel: {e}")
         st.stop()
 else:
     employee_list = pd.DataFrame(st.session_state.get("employee_list", []))
 
-# ✍️ Attendance Entry
+# ✍️ Entry Form
 if not employee_list.empty and current_index < len(employee_list):
     emp = employee_list.iloc[current_index]
     st.subheader(f"🧑 {emp['Employee Name']} (Code: {emp['Employee Code']})")
@@ -116,18 +120,24 @@ if not employee_list.empty and current_index < len(employee_list):
 
         if status == "P":
             c_P += 1
-            ci = st.text_input(f"Check-in ({date_str})", row_data.get(f"{day:02d}_Check-in", "09:00"), key=f"ci_{day}")
-            co = st.text_input(f"Check-out ({date_str})", row_data.get(f"{day:02d}_Check-out", "18:00"), key=f"co_{day}")
-            try:
-                dt_ci = datetime.strptime(ci, "%H:%M")
-                dt_co = datetime.strptime(co, "%H:%M")
-                if dt_co <= dt_ci:
-                    dt_co += timedelta(days=1)
-                hours = round((dt_co - dt_ci).total_seconds() / 3600, 2)
-                ot = round(max(0, hours - 8), 2)
-            except:
-                st.warning("⚠️ Invalid time format")
-                ci, co, ot = "09:00", "18:00", 0
+            default_ci = row_data.get(f"{day:02d}_Check-in", "09:00")
+            default_co = row_data.get(f"{day:02d}_Check-out", "18:00")
+
+            ci_time = st.time_input(f"Check-in ({date_str})",
+                                    value=datetime.strptime(default_ci, "%H:%M").time(), key=f"ci_{day}")
+            co_time = st.time_input(f"Check-out ({date_str})",
+                                    value=datetime.strptime(default_co, "%H:%M").time(), key=f"co_{day}")
+
+            dt_ci = datetime.combine(datetime.today(), ci_time)
+            dt_co = datetime.combine(datetime.today(), co_time)
+            if dt_co <= dt_ci:
+                dt_co += timedelta(days=1)
+            hours = round((dt_co - dt_ci).total_seconds() / 3600, 2)
+            ot = round(max(0, hours - 8), 2)
+
+            ci = ci_time.strftime("%H:%M")
+            co = co_time.strftime("%H:%M")
+
         elif status == "A":
             c_A += 1
             ci = co = "00:00"
@@ -161,7 +171,6 @@ if not employee_list.empty and current_index < len(employee_list):
 
     save_record(current_index, row_data)
 
-    # ✅ Sorted preview
     sorted_row = dict(sorted(row_data.items(), key=lambda x: (not x[0].startswith(('Employee', 'Total', 'OT')), x[0])))
     st.markdown("### Preview Entry")
     st.dataframe(pd.DataFrame([sorted_row]), use_container_width=True)
@@ -177,12 +186,11 @@ if not employee_list.empty and current_index < len(employee_list):
             st.session_state["current_index"] = current_index + 1
             st.rerun()
 
-# 📥 Final Summary and Download
+# ✅ Final Summary
 stored_data = fetch_firestore_records()
 if len(stored_data) > 0 and current_index >= len(stored_data):
     st.success("✅ All employees completed!")
 
-    # ✅ Sort each record before showing/export
     sorted_records = []
     for _, v in sorted(stored_data.items(), key=lambda x: int(x[0])):
         sorted_v = dict(sorted(v.items(), key=lambda x: (not x[0].startswith(('Employee', 'Total', 'OT')), x[0])))
