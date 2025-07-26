@@ -123,20 +123,21 @@ if not employee_list.empty and current_index < len(employee_list):
             default_ci = row_data.get(f"{day:02d}_Check-in", "09:00")
             default_co = row_data.get(f"{day:02d}_Check-out", "18:00")
 
-            ci_time = st.time_input(f"Check-in ({date_str})",
-                                    value=datetime.strptime(default_ci, "%H:%M").time(), key=f"ci_{day}")
-            co_time = st.time_input(f"Check-out ({date_str})",
-                                    value=datetime.strptime(default_co, "%H:%M").time(), key=f"co_{day}")
+            ci_str = st.text_input(f"⏰ Check-in ({date_str}) [HH:MM]", value=default_ci, key=f"ci_{day}")
+            co_str = st.text_input(f"⏰ Check-out ({date_str}) [HH:MM]", value=default_co, key=f"co_{day}")
 
-            dt_ci = datetime.combine(datetime.today(), ci_time)
-            dt_co = datetime.combine(datetime.today(), co_time)
-            if dt_co <= dt_ci:
-                dt_co += timedelta(days=1)
-            hours = round((dt_co - dt_ci).total_seconds() / 3600, 2)
-            ot = round(max(0, hours - 8), 2)
+            try:
+                dt_ci = datetime.strptime(ci_str, "%H:%M")
+                dt_co = datetime.strptime(co_str, "%H:%M")
+                if dt_co <= dt_ci:
+                    dt_co += timedelta(days=1)
+                hours = round((dt_co - dt_ci).total_seconds() / 3600, 2)
+                ot = round(max(0, hours - 8), 2)
+            except:
+                st.warning("⚠️ Please enter valid time in HH:MM format.")
+                ci_str, co_str, ot = "09:00", "18:00", 0
 
-            ci = ci_time.strftime("%H:%M")
-            co = co_time.strftime("%H:%M")
+            ci, co = ci_str, co_str
 
         elif status == "A":
             c_A += 1
