@@ -158,12 +158,17 @@ if not employee_list.empty and current_index < len(employee_list):
             ci = co = "00:00"
             ot = 0
 
+        # 📝 Save daily entry immediately
         row_data[f"{day:02d}_Status"] = status
         row_data[f"{day:02d}_Check-in"] = ci
         row_data[f"{day:02d}_Check-out"] = co
         row_data[f"{day:02d}_OT"] = ot
         total_ot += ot
 
+        save_record(current_index, row_data)  # ✅ Auto-save daily
+        st.success(f"✅ Saved {date_str} entry!")
+
+    # Totals update
     row_data.update({
         "Total P": c_P, "Total A": c_A, "Total L": c_L,
         "Total WO": c_WO, "Total HL": c_HL, "Total PH": c_PH,
