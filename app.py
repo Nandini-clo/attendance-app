@@ -10,9 +10,20 @@ import os
 import calendar
 from dotenv import load_dotenv
 from sheets_backup import append_to_sheet
+import json 
 
 # 🔄 Load environment variables
 load_dotenv()
+
+ # Firebase Key from environment
+with open("firebase_key.json") as f:
+    firebase_key = json.load(f)
+
+cred = credentials.Certificate(firebase_key)
+
+# Google Sheets Key from environment
+with open("google_sheets_key.json") as f:
+    gsheet_key = json.load(f)
 
 # 🔐 Firebase Initialization
 try:
