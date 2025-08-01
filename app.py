@@ -10,12 +10,22 @@ import os
 import calendar
 from dotenv import load_dotenv
 from sheets_backup import append_to_sheet
-import json 
+import json     
+import firebase_admin
+from firebase_admin import credentials, firestore
+
+# ✅ Initialize Firebase only if not already initialized
+if not firebase_admin._apps:
+    cred = credentials.Certificate("firebase_key.json")  # or use env key
+    firebase_admin.initialize_app(cred)
+
+# ✅ Create Firestore client
+db = firestore.client()
 
 # 🔄 Load environment variables
 load_dotenv()
 
- # Firebase Key from environment
+# Firebase Key from environment
 with open("firebase_key.json") as f:
     firebase_key = json.load(f)
 
@@ -27,18 +37,35 @@ with open("google_sheets_key.json") as f:
 
 # 🔐 Firebase Initialization
 try:
-    FIREBASE_JSON_PATH = "firebase_key.json"
-    if not os.path.exists(FIREBASE_JSON_PATH):
-        st.error("❌ Firebase key file not found. Make sure 'firebase_key.json' exists.")
-        st.stop()
+    # Convert HH:MM to float-style number
+    ci = float(ci_str.replace(":", "."))
+    co = float(co_str.replace(":", "."))
 
-    if not firebase_admin._apps:
-        cred = credentials.Certificate(FIREBASE_JSON_PATH)
-        firebase_admin.initialize_app(cred)
-    db = firestore.client()
-except Exception as e:
-    st.error(f"🔥 Firebase initialization failed: {e}")
-    st.stop()
+    # Handle overnight shift
+    if co < ci:
+        co += 24.0
+
+    # Treat check-in/out as float numbers, then calculate worked time
+    worked_time = round(co - ci, 2)
+    raw_ot = worked_time - 8
+
+    # OT calculation logic
+    if raw_ot <= 0.4:
+        ot = 0
+    elif 0.5 <= raw_ot <= 0.7:
+        ot = 0.5
+    elif 0.8 <= raw_ot <= 1.0:
+        ot = 1
+    else:
+        ot = round(raw_ot * 2) / 2
+
+    # Night shift check
+    night_shift = is_night_shift(ci_str, co_str)
+
+except:
+    st.warning("⚠️ Please enter valid time in HH:MM format.")
+    ci_str, co_str, ot, night_shift = "09:00", "18:00", 0, False
+
 
 COLLECTION = "attendance_records"
 
@@ -59,14 +86,13 @@ def reset_firestore():
 @st.cache_data(ttl=300)
 def fetch_firestore_records():
     try:
-        st.write("📡 Trying to connect to Firestore...")  # ✅ Debug line
+        st.write("📡 Trying to connect to Firestore...")
         docs = db.collection(COLLECTION).stream()
-        st.write("✅ Successfully fetched Firestore records.")  # ✅ Debug line
+        st.write("✅ Successfully fetched Firestore records.")
         return {doc.id: doc.to_dict() for doc in docs}
     except Exception as e:
-        st.error(f"🔥 Error fetching Firestore data: {e}")  # ✅ Error message
+        st.error(f"🔥 Error fetching Firestore data: {e}")
         return {}
-
 
 def convert_to_python_types(data):
     return {
@@ -74,7 +100,7 @@ def convert_to_python_types(data):
         for k, v in data.items()
     }
 
-# 🔐 Safe save to Firebase + Google Sheets
+# ✅ Updated Only This Function
 def safe_save(index, data):
     clean_data = convert_to_python_types(data)
     firestore_success = False
@@ -89,6 +115,9 @@ def safe_save(index, data):
         sheets_success = True
     except Exception as e:
         st.warning(f"⚠️ Google Sheets backup failed: {e}")
+
+    fetch_firestore_records.clear()
+
     if not firestore_success and not sheets_success:
         st.error("❌ Save failed. No backup was created.")
     elif not firestore_success:
@@ -122,6 +151,16 @@ def calculate_custom_ot(hours):
 def time_str_to_float_str(time_str):
     h, m = map(int, time_str.split(":"))
     return float(f"{h}.{str(m).zfill(2)[0]}")
+
+def is_night_shift(ci_str, co_str):
+    try:
+        ci = float(ci_str.replace(":", "."))
+        co = float(co_str.replace(":", "."))
+        if co < ci:
+            co += 24.0
+        return ci >= 20.0 or co <= 8.0
+    except:
+        return False
 
 # 📁 Upload Excel
 uploaded_file = st.file_uploader("📄 Upload Excel with 'Employee Code' & 'Employee Name'", type=["xlsx"])
@@ -165,7 +204,7 @@ if not employee_list.empty and current_index < len(employee_list):
     row_data = stored_data.get(str(current_index), {
         "Employee Code": emp["Employee Code"],
         "Employee Name": emp["Employee Name"]
-    })
+    }).copy()
 
     total_ot = 0
     c_P = c_A = c_L = c_WO = c_HL = c_PH = 0
@@ -183,14 +222,18 @@ if not employee_list.empty and current_index < len(employee_list):
                 ci_str = st.text_input(f"⏰ Check-in ({date_str}) [HH:MM]", value=default_ci, key=f"ci_{day}")
                 co_str = st.text_input(f"⏰ Check-out ({date_str}) [HH:MM]", value=default_co, key=f"co_{day}")
                 try:
-                    ci = time_str_to_float_str(ci_str)
-                    co = time_str_to_float_str(co_str)
+                    ci = float(ci_str.replace(":", "."))
+                    co = float(co_str.replace(":", "."))
+                    if co < ci:
+                        co += 24.0
                     hours = round(co - ci, 2)
                     ot = calculate_custom_ot(hours)
+                    night_shift = is_night_shift(ci_str, co_str)
                 except:
                     st.warning("⚠️ Please enter valid time in HH:MM format.")
-                    ci_str, co_str, ot = "09:00", "18:00", 0
+                    ci_str, co_str, ot, night_shift = "09:00", "18:00", 0, False
                 ci, co = ci_str, co_str
+                row_data[f"{day:02d}_Night"] = "Yes" if night_shift else "No"
             else:
                 if status == "A": c_A += 1
                 elif status == "L": c_L += 1
@@ -201,6 +244,7 @@ if not employee_list.empty and current_index < len(employee_list):
                 ot = 0
                 if status == "WO": co = "17:00"
                 if status == "HL": co = "13:00"
+                row_data[f"{day:02d}_Night"] = "No"
 
             row_data[f"{day:02d}_Status"] = status
             row_data[f"{day:02d}_Check-in"] = ci
@@ -209,17 +253,14 @@ if not employee_list.empty and current_index < len(employee_list):
             total_ot += ot
 
     for day in range(days_in_month + 1, 32):
-        row_data.pop(f"{day:02d}_Status", None)
-        row_data.pop(f"{day:02d}_Check-in", None)
-        row_data.pop(f"{day:02d}_Check-out", None)
-        row_data.pop(f"{day:02d}_OT", None)
+        for key in ["Status", "Check-in", "Check-out", "OT", "Night"]:
+            row_data.pop(f"{day:02d}_{key}", None)
 
     row_data.update({
         "Total P": c_P, "Total A": c_A, "Total L": c_L,
         "Total WO": c_WO, "Total HL": c_HL, "Total PH": c_PH,
         "OT Hours": round(total_ot, 1)
     })
-    safe_save(current_index, row_data)
 
     sorted_row = dict(sorted(row_data.items(), key=lambda x: (not x[0].startswith(('Employee', 'Total', 'OT')), x[0])))
     st.markdown("### Preview Entry")
@@ -227,22 +268,22 @@ if not employee_list.empty and current_index < len(employee_list):
 
     col1, col2 = st.columns(2)
     with col1:
-        if st.button("⏹️ Previous"):
+        if st.button("⏹️ Previous", key=f"btn_prev_{current_index}"):
             if current_index > 0:
                 st.session_state["current_index"] = current_index - 1
                 st.rerun()
     with col2:
-        if st.button("✅ Save & Next"):
+        if st.button("✅ Save & Next", key=f"btn_next_{current_index}"):
+            safe_save(current_index, row_data.copy())
             st.session_state["current_index"] = current_index + 1
             st.rerun()
 
-# ✅ Final download
 stored_data = fetch_firestore_records()
 if stored_data:
     st.markdown("---")
     st.subheader("🗓️ Download Attendance Till Now")
     sorted_records = []
-    for i in range(current_index + 1):
+    for i in range(st.session_state.get("total_employees", 0)):
         if str(i) in stored_data:
             v = stored_data[str(i)]
             sorted_v = dict(sorted(v.items(), key=lambda x: (not x[0].startswith(('Employee', 'Total', 'OT')), x[0])))
@@ -254,4 +295,4 @@ if stored_data:
         towrite = io.BytesIO()
         with pd.ExcelWriter(towrite, engine='xlsxwriter') as writer:
             final_df.to_excel(writer, index=False, sheet_name="Attendance")
-        st.download_button("🗓️ Download Excel Till Now", data=towrite.getvalue(), file_name="attendance_upto_now.xlsx")
+        st.download_button("📥 Download Excel Till Now", data=towrite.getvalue(), file_name="attendance_upto_now.xlsx")
