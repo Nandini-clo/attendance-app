@@ -11,16 +11,47 @@ import os
 import calendar
 from dotenv import load_dotenv
 from sheets_backup import append_to_sheet
+load_dotenv()  # 👈 This line loads .env if running locally
 
-if not firebase_admin._apps:  # ✅ Prevent multiple initializations
-    cred = credentials.Certificate("firebase_key.json")
-    firebase_admin.initialize_app(cred)
+# 🔐 Get keys from environment variables
 
-print("✅ Firebase initialized successfully!")
+# ✅ Load Google Sheets key from file
+try:
+    with open("sheets_key.json") as f:
+        sheets_key = json.load(f)
+except FileNotFoundError:
+    raise FileNotFoundError("❌ sheets_key.json not found in your project folder!")
+except json.JSONDecodeError:
+    raise ValueError("❌ sheets_key.json is not valid JSON!")
+
+# ✅ Load Firebase key from file (e.g., firebase_key.json)
+try:
+    with open("firebase_key.json") as f:
+        firebase_key_dict = json.load(f)
+except FileNotFoundError:
+    raise FileNotFoundError("❌ firebase_key.json not found!")
+except json.JSONDecodeError:
+    raise ValueError("❌ firebase_key.json is not valid JSON!")
+
+
+# ✅ Parse JSON safely
+try:
+    with open("sheets_key.json") as f:
+         sheets_key = json.load(f)  # ✅ this gives you a Python dictionary
+
+except json.JSONDecodeError as e:
+    raise ValueError(f"Invalid SHEETS_KEY_JSON format: {e}")
+cred = credentials.Certificate("firebase_key.json")
+firebase_admin.initialize_app(cred)
 db = firestore.client()
-# ✅ Load Google Sheets Key
-with open("sheets_key.json", "r") as f:
-    key_data = json.load(f)
+try:
+    with open("firebase_key.json") as f:
+        firebase_key = json.load(f)
+except json.JSONDecodeError as e:
+    raise ValueError(f"Invalid FIREBASE_KEY_JSON format: {e}")
+
+
+
 
 # 🔐 Firebase Initialization
 try:
