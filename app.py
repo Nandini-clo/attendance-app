@@ -11,26 +11,21 @@ import calendar
 from dotenv import load_dotenv
 from sheets_backup import append_to_sheet
 import json     
-import firebase_admin
-from firebase_admin import credentials, firestore
-
-# ✅ Initialize Firebase only if not already initialized
-if not firebase_admin._apps:
-    cred = credentials.Certificate("firebase_key.json")  # or use env key
-    firebase_admin.initialize_app(cred)
-
-# ✅ Create Firestore client
-db = firestore.client()
-
-# 🔄 Load environment variables
+# ✅ Load environment variables
 load_dotenv()
 
-# Firebase Key from environment
+# ✅ Load Firebase credentials from file
 with open("firebase_key.json") as f:
     firebase_key = json.load(f)
 
 cred = credentials.Certificate(firebase_key)
 
+# ✅ Initialize Firebase app if not already initialized
+if not firebase_admin._apps:
+    firebase_admin.initialize_app(cred)
+
+# ✅ Create Firestore client
+db = firestore.client()
 # Google Sheets Key from environment
 with open("google_sheets_key.json") as f:
     gsheet_key = json.load(f)
