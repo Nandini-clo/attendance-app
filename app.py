@@ -4,31 +4,23 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 import firebase_admin
-from firebase_admin import credentials, firestore
+from firebase_admin import credentials, firestore,initialize_app
 import io
+import json
 import os
 import calendar
 from dotenv import load_dotenv
 from sheets_backup import append_to_sheet
-import json     
-# ✅ Load environment variables
-load_dotenv()
 
-# ✅ Load Firebase credentials from file
-with open("firebase_key.json") as f:
-    firebase_key = json.load(f)
-
-cred = credentials.Certificate(firebase_key)
-
-# ✅ Initialize Firebase app if not already initialized
-if not firebase_admin._apps:
+if not firebase_admin._apps:  # ✅ Prevent multiple initializations
+    cred = credentials.Certificate("firebase_key.json")
     firebase_admin.initialize_app(cred)
 
-# ✅ Create Firestore client
+print("✅ Firebase initialized successfully!")
 db = firestore.client()
-# Google Sheets Key from environment
-with open("google_sheets_key.json") as f:
-    gsheet_key = json.load(f)
+# ✅ Load Google Sheets Key
+with open("sheets_key.json", "r") as f:
+    key_data = json.load(f)
 
 # 🔐 Firebase Initialization
 try:
