@@ -11,49 +11,120 @@ import os
 import calendar
 from dotenv import load_dotenv
 from sheets_backup import append_to_sheet
-load_dotenv()  # 👈 This line loads .env if running locally
+load_dotenv()  # Loads .env in local dev
 
-# 🔐 Get keys from environment variables
+import ast
+# other imports remain the same...
+def _extract_json_like(s: str) -> str | None:
+    if not isinstance(s, str):
+        return None
+    start = s.find("{")
+    end = s.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        return s[start:end+1]
+    return None
 
-# ✅ Load Google Sheets key from file
+def _normalize_private_key(key_dict):
+    """Fix newline issues in private_key for Google service accounts."""
+    if isinstance(key_dict, dict) and "private_key" in key_dict and isinstance(key_dict["private_key"], str):
+        key_dict["private_key"] = key_dict["private_key"].replace("\\n", "\n")
+    return key_dict
+
+def load_json_key(key_name):
+    """
+    Robust loader for JSON-like secrets from st.secrets or env vars.
+    Returns a dict or raises a RuntimeError with helpful preview.
+    """
+    # 1) Try Streamlit secrets
+    if key_name in st.secrets:
+        val = st.secrets[key_name]
+        if isinstance(val, dict):
+            return _normalize_private_key(val)
+        if isinstance(val, str):
+            # Try direct JSON
+            try:
+                parsed = json.loads(val)
+                return _normalize_private_key(parsed)
+            except Exception:
+                pass
+            # Try extracting {...} and parsing
+            extracted = _extract_json_like(val)
+            if extracted:
+                try:
+                    parsed = json.loads(extracted)
+                    return _normalize_private_key(parsed)
+                except Exception:
+                    pass
+            # Try Python literal eval
+            try:
+                parsed = ast.literal_eval(val)
+                return _normalize_private_key(parsed)
+            except Exception:
+                if extracted:
+                    try:
+                        parsed = ast.literal_eval(extracted)
+                        return _normalize_private_key(parsed)
+                    except Exception:
+                        pass
+            preview = repr(val)[:1000]
+            raise RuntimeError(
+                f"{key_name} in st.secrets could not be parsed as JSON or Python literal.\n"
+                f"Preview (first 1000 chars):\n{preview}\n\n"
+                "Hint: place valid JSON in secrets.toml (wrap with triple quotes) or provide the env var."
+            )
+        # unexpected type
+        raise RuntimeError(f"{key_name} found in st.secrets but is not dict/string (type={type(val)}).")
+
+    # 2) Fallback: environment variable
+    env_val = os.getenv(key_name)
+    if not env_val:
+        return None
+    # attempt same strategies on env var
+    try:
+        parsed = json.loads(env_val)
+        return _normalize_private_key(parsed)
+    except Exception:
+        pass
+    extracted = _extract_json_like(env_val)
+    if extracted:
+        try:
+            parsed = json.loads(extracted)
+            return _normalize_private_key(parsed)
+        except Exception:
+            pass
+    try:
+        parsed = ast.literal_eval(env_val)
+        return _normalize_private_key(parsed)
+    except Exception as e:
+        raise RuntimeError(f"{key_name} exists in env but is not valid JSON/dict: {e}")
+
+# ---- Load keys ----
+sheets_key = load_json_key("SHEETS_KEY")
+firebase_key = load_json_key("FIREBASE_KEY")
+
+if sheets_key is None:
+    st.error("❌ Failed to load SHEETS_KEY from secrets or .env.")
+    st.stop()
+if firebase_key is None:
+    st.error("❌ Failed to load FIREBASE_KEY from secrets or .env.")
+    st.stop()
+cred = credentials.Certificate(firebase_key)
+# ---- Create credentials and init Firebase ----
+# ✅ Initialize Firebase App safely
 try:
-    with open("sheets_key.json") as f:
-        sheets_key = json.load(f)
-except FileNotFoundError:
-    raise FileNotFoundError("❌ sheets_key.json not found in your project folder!")
-except json.JSONDecodeError:
-    raise ValueError("❌ sheets_key.json is not valid JSON!")
+    firebase_admin.get_app()
+except ValueError:
+    firebase_admin.initialize_app(cred)
 
-# ✅ Load Firebase key from file (e.g., firebase_key.json)
-try:
-    with open("firebase_key.json") as f:
-        firebase_key_dict = json.load(f)
-except FileNotFoundError:
-    raise FileNotFoundError("❌ firebase_key.json not found!")
-except json.JSONDecodeError:
-    raise ValueError("❌ firebase_key.json is not valid JSON!")
-
-
-# ✅ Parse JSON safely
-try:
-    with open("sheets_key.json") as f:
-         sheets_key = json.load(f)  # ✅ this gives you a Python dictionary
-
-except json.JSONDecodeError as e:
-    raise ValueError(f"Invalid SHEETS_KEY_JSON format: {e}")
-cred = credentials.Certificate("firebase_key.json")
-firebase_admin.initialize_app(cred)
+# ✅ Initialize Firestore DB
 db = firestore.client()
-try:
-    with open("firebase_key.json") as f:
-        firebase_key = json.load(f)
-except json.JSONDecodeError as e:
-    raise ValueError(f"Invalid FIREBASE_KEY_JSON format: {e}")
+
+docs = db.collection('test_collection').stream()
+for doc in docs:
+    print(f'{doc.id} => {doc.to_dict()}')
 
 
 
-
-# 🔐 Firebase Initialization
 try:
     # Convert HH:MM to float-style number
     ci = float(ci_str.replace(":", "."))
@@ -81,13 +152,13 @@ try:
     night_shift = is_night_shift(ci_str, co_str)
 
 except:
-    st.warning("⚠️ Please enter valid time in HH:MM format.")
+    st.warning(" Please enter valid time in HH:MM format.")
     ci_str, co_str, ot, night_shift = "09:00", "18:00", 0, False
 
 
 COLLECTION = "attendance_records"
 
-st.set_page_config(page_title="Attendance App", layout="wide")
+st.set_page_config(page_title="Sheet1", layout="wide")
 st.title("📋 Employee Attendance Sheet Generator")
 
 # 🔧 Firestore helpers
@@ -129,8 +200,8 @@ def safe_save(index, data):
     except Exception as e:
         st.warning(f"⚠️ Firestore save failed: {e}")
     try:
-        append_to_sheet(clean_data)
-        sheets_success = True
+      append_to_sheet("Attendance_Backup", list(clean_data.values()))  # ✅ CORRECT
+      sheets_success = True
     except Exception as e:
         st.warning(f"⚠️ Google Sheets backup failed: {e}")
 
